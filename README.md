@@ -76,7 +76,7 @@ Prerequisites: Node.js/npm, Python, PostgreSQL or Docker Compose.
    npm run dev
    ```
 
-`web/.env.example` contains only `NEXT_PUBLIC_API_BASE_URL`. Do not add provider credentials or model settings to browser-visible variables.
+`web/.env.example` contains only `NEXT_PUBLIC_API_URL`. Do not add provider credentials or model settings to browser-visible variables.
 
 ## Environment variables
 
@@ -105,6 +105,10 @@ cd ..\web
 npm run lint
 npm run build
 ```
+
+## Production deployment
+
+Deploy the Next.js frontend to Vercel and the FastAPI API to Railway, backed by Railway PostgreSQL or Neon. The production rollout, provider-specific configuration, migration strategy, and post-deploy verification checklist are in [docs/deployment.md](docs/deployment.md).
 
 ## Security notes
 

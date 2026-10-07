@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 type Question = { id: string; competency: string; question: string; difficulty: number; type: string; sequence_number: number };
 type Progress = { status: "in_progress" | "awaiting_evaluation" | "completed"; question_limit: number; question: Question | null };
 type Evaluation = { overall_score: number; feedback: string; strengths: string[]; missing_concepts: string[]; suggested_better_answer_outline: string[] };

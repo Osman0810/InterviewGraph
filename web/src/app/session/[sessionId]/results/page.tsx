@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 type Priority = "low" | "medium" | "high" | "critical"; type Tab = "overview" | "gaps" | "feedback" | "plan";
 type Competency = { competency_id: string; name: string; category: string; importance: number; final_score: number; confidence: number; gap_priority: Priority };
 type ReplayResult = { replay_id: string; original_score: number; new_score: number; improvement: number; concepts_corrected: string[]; concepts_still_missing: string[]; new_feedback: string; improved_answer_outline: string[] };

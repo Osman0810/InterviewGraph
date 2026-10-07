@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 type Competency = { name: string; category: string; importance: number };
 type Summary = { ai_provider?: "gemini" | "openai"; competencies: Competency[]; resume_analysis_complete: boolean };
 
