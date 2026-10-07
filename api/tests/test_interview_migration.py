@@ -1,4 +1,7 @@
+import importlib.util
 from io import StringIO
+from pathlib import Path
+from types import SimpleNamespace
 from uuid import uuid4
 
 from alembic import command
@@ -9,6 +12,58 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.models import InterviewSession, Question
 from app.models.enums import SessionMode, SessionStatus, QuestionType
+
+
+MIGRATION_05_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "alembic"
+    / "versions"
+    / "20261005_05_resume_evidence_score_source.py"
+)
+
+
+def _load_migration_05():
+    spec = importlib.util.spec_from_file_location("migration_20261005_05", MIGRATION_05_PATH)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+class _EnumLabelResult:
+    def __init__(self, labels: set[str]):
+        self._labels = labels
+
+    def scalars(self):
+        return self
+
+    def all(self):
+        return list(self._labels)
+
+
+class _MigrationBind:
+    def __init__(self, dialect_name: str, labels: set[str]):
+        self.dialect = SimpleNamespace(name=dialect_name)
+        self._labels = labels
+
+    def execute(self, _statement):
+        return _EnumLabelResult(self._labels)
+
+
+class _MigrationOp:
+    def __init__(self, dialect_name: str, labels: set[str], *, offline: bool = False):
+        self._bind = _MigrationBind(dialect_name, labels)
+        self._offline = offline
+        self.statements: list[str] = []
+
+    def get_bind(self):
+        return self._bind
+
+    def get_context(self):
+        return SimpleNamespace(as_sql=self._offline)
+
+    def execute(self, statement):
+        self.statements.append(str(statement))
 
 
 def test_migration_preserves_existing_questions_and_matches_orm(tmp_path, monkeypatch):
@@ -52,3 +107,49 @@ def test_postgres_sql_creates_enums_once(monkeypatch):
     assert sql.count("CREATE TYPE session_status") == 1
     assert sql.count("CREATE TYPE question_difficulty") == 1
     assert "interview_question_limit" in sql and "ck_question_difficulty" in sql
+    assert "ALTER TYPE score_source RENAME VALUE" not in sql
+
+
+def test_score_source_upgrade_skips_fresh_postgres_enum():
+    migration = _load_migration_05()
+    fake_op = _MigrationOp("postgresql", {"interview", "resume_evidence", "combined"})
+    migration.op = fake_op
+
+    migration.upgrade()
+
+    assert fake_op.statements == []
+
+
+def test_score_source_upgrade_renames_legacy_postgres_enum_label():
+    migration = _load_migration_05()
+    fake_op = _MigrationOp("postgresql", {"interview", "resume", "combined"})
+    migration.op = fake_op
+
+    migration.upgrade()
+
+    assert fake_op.statements == [
+        "ALTER TYPE score_source RENAME VALUE 'resume' TO 'resume_evidence'"
+    ]
+
+
+def test_score_source_downgrade_renames_only_when_legacy_label_is_absent():
+    migration = _load_migration_05()
+    fake_op = _MigrationOp("postgresql", {"interview", "resume_evidence", "combined"})
+    migration.op = fake_op
+
+    migration.downgrade()
+
+    assert fake_op.statements == [
+        "ALTER TYPE score_source RENAME VALUE 'resume_evidence' TO 'resume'"
+    ]
+
+
+def test_score_source_migration_leaves_non_postgresql_dialects_unchanged():
+    migration = _load_migration_05()
+    fake_op = _MigrationOp("sqlite", {"interview", "resume"})
+    migration.op = fake_op
+
+    migration.upgrade()
+    migration.downgrade()
+
+    assert fake_op.statements == []
