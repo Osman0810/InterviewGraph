@@ -1,9 +1,11 @@
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class StudyPlanTopic(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     topic: str = Field(min_length=1, max_length=160)
     priority: Literal["Critical", "Important", "Optional"]
     current_gap: str = Field(min_length=1, max_length=800)
@@ -15,6 +17,8 @@ class StudyPlanTopic(BaseModel):
 
 
 class StudyPlanOutput(BaseModel):
-    critical: list[StudyPlanTopic] = Field(default_factory=list)
-    important: list[StudyPlanTopic] = Field(default_factory=list)
-    optional: list[StudyPlanTopic] = Field(default_factory=list)
+    model_config = ConfigDict(extra="forbid")
+
+    critical: list[StudyPlanTopic]
+    important: list[StudyPlanTopic]
+    optional: list[StudyPlanTopic]

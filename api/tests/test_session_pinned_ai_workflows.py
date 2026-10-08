@@ -255,7 +255,9 @@ def test_study_plan_generation_uses_session_pinned_provider(provider_name, model
                         hands_on_task="Build semantic search", interview_questions_to_practice=["How does ANN work?"],
                         estimated_time_minutes=60,
                     )
-                ]
+                ],
+                important=[],
+                optional=[],
             )
         ],
         provider_name=fake_provider_name,

@@ -44,12 +44,16 @@ def study_plan_client():
         db.commit()
         session_id = session.id
 
-    output = StudyPlanOutput(critical=[StudyPlanTopic(
-        topic="Vector Search", priority="Critical", current_gap="Weak ANN retrieval evidence.",
-        learning_objectives=["Explain retrieval tradeoffs"], concepts_to_review=["ANN vs exact", "reranking"],
-        hands_on_task="Build semantic search across 1,000 documents.",
-        interview_questions_to_practice=["How do you choose top-k?"], estimated_time_minutes=120,
-    )])
+    output = StudyPlanOutput(
+        critical=[StudyPlanTopic(
+            topic="Vector Search", priority="Critical", current_gap="Weak ANN retrieval evidence.",
+            learning_objectives=["Explain retrieval tradeoffs"], concepts_to_review=["ANN vs exact", "reranking"],
+            hands_on_task="Build semantic search across 1,000 documents.",
+            interview_questions_to_practice=["How do you choose top-k?"], estimated_time_minutes=120,
+        )],
+        important=[],
+        optional=[],
+    )
     provider = MagicMock()
     provider.provider_name = "google"
     provider.model_name = "test-model"
@@ -101,11 +105,15 @@ def test_existing_plan_is_idempotent_but_regenerate_replaces_it(study_plan_clien
 
 def test_rejects_a_topic_that_does_not_match_its_priority_group(study_plan_client):
     client, session_id, provider, _ = study_plan_client
-    provider.generate_structured.return_value = StudyPlanOutput(important=[StudyPlanTopic(
-        topic="Vector Search", priority="Critical", current_gap="Mismatch", learning_objectives=["Learn"],
-        concepts_to_review=["ANN"], hands_on_task="Build it", interview_questions_to_practice=["Why?"],
-        estimated_time_minutes=30,
-    )])
+    provider.generate_structured.return_value = StudyPlanOutput(
+        critical=[],
+        important=[StudyPlanTopic(
+            topic="Vector Search", priority="Critical", current_gap="Mismatch", learning_objectives=["Learn"],
+            concepts_to_review=["ANN"], hands_on_task="Build it", interview_questions_to_practice=["Why?"],
+            estimated_time_minutes=30,
+        )],
+        optional=[],
+    )
 
     response = client.post(f"/sessions/{session_id}/study-plan")
 

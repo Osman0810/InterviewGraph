@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-import json
 import logging
 from random import uniform
 from time import sleep
 from typing import Any, Callable, TypeVar
 
 import openai
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel
 
 from app.ai.provider import (
     AIConfigurationError,
@@ -81,37 +80,20 @@ class OpenAIProvider(AIProvider):
 
         for attempt in range(self._max_retries):
             try:
-                response = self._client.responses.create(
+                response = self._client.responses.parse(
                     model=self._model_name,
                     input=prompt,
                     temperature=0,
                     store=False,
-                    text={
-                        "format": {
-                            "type": "json_schema",
-                            "name": self._schema_name(response_schema),
-                            "schema": response_schema.model_json_schema(),
-                            "strict": True,
-                        }
-                    },
+                    text_format=response_schema,
                 )
-                output_text = getattr(response, "output_text", None)
-                if not isinstance(output_text, str) or not output_text.strip():
-                    self._log_response_metadata(response, reason="output_text_missing")
+                result = getattr(response, "output_parsed", None)
+                if not isinstance(result, response_schema):
+                    self._log_response_metadata(response, reason="output_parsed_missing")
                     raise AIStructuredResponseError("OpenAI returned no structured result")
-                try:
-                    payload = json.loads(output_text)
-                except json.JSONDecodeError:
-                    self._log_response_metadata(response, reason="json_decode_failed")
-                    raise AIStructuredResponseError("OpenAI returned invalid JSON") from None
-                return response_schema.model_validate(payload)
+                return result
             except AIStructuredResponseError:
                 raise
-            except ValidationError as error:
-                self._log_validation_metadata(error)
-                raise AIStructuredResponseError(
-                    "OpenAI returned an invalid structured result"
-                ) from error
             except openai.AuthenticationError as error:
                 self._log_api_error(error)
                 raise AIConfigurationError("OpenAI authentication failed") from error
@@ -131,6 +113,11 @@ class OpenAIProvider(AIProvider):
                 if attempt == self._max_retries - 1:
                     raise AIServiceUnavailableError("OpenAI service is unavailable") from error
                 self._retry_with_backoff(attempt, reason="server_error")
+            except openai.APIResponseValidationError as error:
+                self._log_api_error(error)
+                raise AIStructuredResponseError(
+                    "OpenAI returned an invalid structured result"
+                ) from error
             except openai.APIStatusError as error:
                 self._log_api_error(error)
                 if error.status_code >= 500:
@@ -145,20 +132,12 @@ class OpenAIProvider(AIProvider):
 
         raise AIServiceUnavailableError("OpenAI service is unavailable")
 
-    @staticmethod
-    def _schema_name(response_schema: type[BaseModel]) -> str:
-        """Return an API-safe schema name without changing the actual schema."""
-        return "".join(
-            character if character.isalnum() or character in "_-" else "_"
-            for character in response_schema.__name__
-        )[:64] or "structured_response"
-
     def _retry_with_backoff(self, attempt: int, *, reason: str) -> None:
         base_delay = 2**attempt
         delay = base_delay + self._jitter(0, base_delay * 0.25)
         logger.warning("openai_retry metadata=%s", {
             "model": self._model_name,
-            "operation": "responses_create_structured",
+            "operation": "responses_parse_structured",
             "attempt": attempt + 1,
             "max_attempts": self._max_retries,
             "reason": reason,
@@ -169,26 +148,19 @@ class OpenAIProvider(AIProvider):
     def _log_api_error(self, error: Exception) -> None:
         logger.warning("openai_api_error metadata=%s", {
             "model": self._model_name,
-            "operation": "responses_create_structured",
+            "operation": "responses_parse_structured",
             "exception_type": type(error).__name__,
             "status_code": getattr(error, "status_code", None),
+            "error_code": getattr(error, "code", None),
+            "parameter": getattr(error, "param", None),
         })
 
     def _log_response_metadata(self, response: Any, *, reason: str) -> None:
-        output_text = getattr(response, "output_text", None)
+        output_parsed = getattr(response, "output_parsed", None)
         logger.warning("openai_structured_response_rejected metadata=%s", {
             "model": self._model_name,
-            "operation": "responses_create_structured",
+            "operation": "responses_parse_structured",
             "reason": reason,
             "response_status": getattr(response, "status", None),
-            "output_text_exists": isinstance(output_text, str) and bool(output_text),
-            "output_text_length": len(output_text) if isinstance(output_text, str) else 0,
-        })
-
-    def _log_validation_metadata(self, error: ValidationError) -> None:
-        logger.warning("openai_structured_validation_failed metadata=%s", {
-            "model": self._model_name,
-            "operation": "responses_create_structured",
-            "exception_type": type(error).__name__,
-            "fields": [{"path": list(item["loc"]), "type": item["type"]} for item in error.errors()],
+            "output_parsed_type": type(output_parsed).__name__ if output_parsed is not None else None,
         })

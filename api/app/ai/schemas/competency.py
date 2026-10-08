@@ -33,7 +33,7 @@ class CompetencyOutput(BaseModel):
     importance: int = Field(ge=1, le=5)
     required_level: RequiredLevel
     jd_evidence: str = Field(min_length=1)
-    question_topics: list[str] = Field(default_factory=list)
+    question_topics: list[str]
 
 
 class CompetencyExtraction(BaseModel):
