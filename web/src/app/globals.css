@@ -1,26 +1,55 @@
 @import "tailwindcss";
 
 :root {
-  --background: #07110f;
-  --foreground: #e7f0ec;
+  --background: #0e1116;
+  --surface: #151a21;
+  --surface-elevated: #1a2029;
+  --border: #29313d;
+  --foreground: #f4f7fb;
+  --muted: #9ba7b8;
+  --primary: #818cf8;
+  --primary-strong: #6366f1;
+  --success: #4ade80;
+  --warning: #fbbf24;
+  --danger: #fb7185;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --color-surface: var(--surface);
+  --color-surface-elevated: var(--surface-elevated);
+  --color-app-border: var(--border);
+  --color-app-muted: var(--muted);
+  --color-primary: var(--primary);
+  --color-primary-strong: var(--primary-strong);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-danger: var(--danger);
 }
 
-* { border-color: rgb(39 58 53 / 0.9); }
+* { border-color: var(--border); }
 
 body {
   min-width: 320px;
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 
-::selection { background: #176b58; color: #effcf6; }
+::selection { background: #6366f1; color: #f8fafc; }
 
 button, a, input, textarea { -webkit-tap-highlight-color: transparent; }
 
 textarea { resize: vertical; }
+
+button, a, input, textarea, select { outline-color: var(--primary); }
+
+:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+.bg-\[\#07110f\] { background-color: var(--background) !important; }
+.bg-\[\#0b1916\] { background-color: var(--surface-elevated) !important; }
+.text-\[\#07110f\] { color: #fff !important; }

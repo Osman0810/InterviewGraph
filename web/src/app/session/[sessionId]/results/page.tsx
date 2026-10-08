@@ -2,33 +2,560 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
+import {
+  Badge,
+  Button,
+  Card,
+  EmptyState,
+  ErrorState,
+  LoadingState,
+  PageHeader,
+} from "../../../../components/ui";
+import { ReplayPanel } from "../../../../components/results/replay-panel";
+import { StudyPlanPanel } from "../../../../components/results/study-plan-panel";
+import { apiErrorMessage, networkErrorMessage } from "../../../../lib/api-error";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
-type Priority = "low" | "medium" | "high" | "critical"; type Tab = "overview" | "gaps" | "feedback" | "plan";
-type Competency = { competency_id: string; name: string; category: string; importance: number; final_score: number; confidence: number; gap_priority: Priority };
-type ReplayResult = { replay_id: string; original_score: number; new_score: number; improvement: number; concepts_corrected: string[]; concepts_still_missing: string[]; new_feedback: string; improved_answer_outline: string[] };
-type Feedback = { question_id: string; competency_name: string; question: string; candidate_answer: string | null; score: number; strengths: string[]; missing_concepts: string[]; improved_answer_outline: string[]; replay_attempts: ReplayResult[] };
-type StudyTopic = { topic: string; current_gap: string; concepts_to_review: string[]; hands_on_task: string; interview_questions_to_practice: string[]; estimated_time_minutes: number };
-type StudyPlan = { critical: StudyTopic[]; important: StudyTopic[]; optional: StudyTopic[] };
-type Results = { ai_provider?: string; mode: "interview" | "resume_only"; label: string; overall_readiness: number; overall_confidence: number; competencies: Competency[]; strengths: string[]; priority_gaps: string[]; interview_feedback: Feedback[]; study_plan: StudyPlan | null };
-const rank: Record<Priority, number> = { critical: 4, high: 3, medium: 2, low: 1 };
-const importance = (value: number) => value >= 5 ? "Critical" : value >= 4 ? "High" : value >= 3 ? "Moderate" : "Supporting";
-const status = (item: Competency) => item.gap_priority === "critical" || item.gap_priority === "high" ? "Priority Gap" : item.gap_priority === "medium" ? "Needs Review" : item.final_score >= 80 ? "Strong" : "Good";
-const statusClass = (item: Competency) => item.gap_priority === "critical" || item.gap_priority === "high" ? "border-rose-400/30 bg-rose-400/10 text-rose-200" : item.gap_priority === "medium" ? "border-amber-300/30 bg-amber-300/10 text-amber-100" : "border-emerald-400/30 bg-emerald-400/10 text-emerald-100";
-function message(text: string) { const value = text.toLowerCase(); if (value.includes("429") || value.includes("rate limit")) return "AI usage limit reached. Please try again later or start a new session with another available provider."; if (value.includes("503") || value.includes("unavailable")) return "AI service is temporarily unavailable. Please try again shortly."; if (value.includes("504") || value.includes("timed out")) return "The AI request timed out. Please try again."; return text; }
-function Meter({ value }: { value: number }) { return <div className="mt-3 h-2 overflow-hidden rounded-full bg-slate-800"><div className="h-full rounded-full bg-emerald-300" style={{ width: `${Math.max(0, Math.min(100, value))}%` }} /></div>; }
+type Priority = "low" | "medium" | "high" | "critical";
+type Tab = "overview" | "gaps" | "feedback" | "plan";
+type Competency = {
+  competency_id: string;
+  name: string;
+  category: string;
+  importance: number;
+  final_score: number;
+  confidence: number;
+  gap_priority: Priority;
+};
+type ReplayResult = {
+  replay_id: string;
+  original_score: number;
+  new_score: number;
+  improvement: number;
+  concepts_corrected: string[];
+  concepts_still_missing: string[];
+  new_feedback: string;
+  improved_answer_outline: string[];
+};
+type Feedback = {
+  question_id: string;
+  competency_name: string;
+  question: string;
+  candidate_answer: string | null;
+  score: number;
+  strengths: string[];
+  missing_concepts: string[];
+  improved_answer_outline: string[];
+  replay_attempts: ReplayResult[];
+};
+type StudyTopic = {
+  topic: string;
+  current_gap: string;
+  concepts_to_review: string[];
+  hands_on_task: string;
+  interview_questions_to_practice: string[];
+  estimated_time_minutes: number;
+};
+type StudyPlan = {
+  critical: StudyTopic[];
+  important: StudyTopic[];
+  optional: StudyTopic[];
+};
+type Results = {
+  ai_provider?: string;
+  mode: "interview" | "resume_only";
+  label: string;
+  overall_readiness: number;
+  overall_confidence: number;
+  competencies: Competency[];
+  strengths: string[];
+  priority_gaps: string[];
+  interview_feedback: Feedback[];
+  study_plan: StudyPlan | null;
+};
+
+const rank: Record<Priority, number> = {
+  critical: 4,
+  high: 3,
+  medium: 2,
+  low: 1,
+};
+const importance = (value: number) =>
+  value >= 5
+    ? "Critical"
+    : value >= 4
+      ? "High"
+      : value >= 3
+        ? "Moderate"
+        : "Supporting";
+const confidence = (value: number) =>
+  value >= 0.8 ? "High" : value >= 0.5 ? "Medium" : "Low";
+const status = (item: Competency) =>
+  item.gap_priority === "critical" || item.gap_priority === "high"
+    ? "Priority Gap"
+    : item.gap_priority === "medium"
+      ? "Needs Review"
+      : item.final_score >= 80
+        ? "Strong"
+        : "Good";
+const statusTone = (
+  item: Competency,
+): "success" | "primary" | "warning" | "danger" =>
+  item.gap_priority === "critical" || item.gap_priority === "high"
+    ? "danger"
+    : item.gap_priority === "medium"
+      ? "warning"
+      : item.final_score >= 80
+        ? "success"
+        : "primary";
+const statusColor = (item: Competency) =>
+  statusTone(item) === "danger"
+    ? "bg-rose-400"
+    : statusTone(item) === "warning"
+      ? "bg-amber-400"
+      : statusTone(item) === "success"
+        ? "bg-success"
+        : "bg-primary";
+function GapRow({ item }: { item: Competency }) {
+  return (
+    <article className="grid gap-4 p-5 sm:grid-cols-[minmax(10rem,1.4fr)_minmax(7rem,.8fr)_minmax(8rem,.8fr)_minmax(7rem,.7fr)_auto] sm:items-center sm:px-6">
+      <div>
+        <h3 className="font-semibold text-white">{item.name}</h3>
+        <p className="mt-1 text-sm text-app-muted">{item.category}</p>
+      </div>
+      <div>
+        <p className="text-xl font-semibold text-white">
+          {Math.round(item.final_score)}%
+        </p>
+        <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-800">
+          <div
+            className={`h-full rounded-full ${statusColor(item)}`}
+            style={{
+              width: `${Math.max(0, Math.min(100, item.final_score))}%`,
+            }}
+          />
+        </div>
+      </div>
+      <p className="text-sm text-slate-300">
+        <span className="block text-xs text-app-muted sm:hidden">
+          JD importance
+        </span>
+        {importance(item.importance)} importance
+      </p>
+      <p className="text-sm text-slate-300">
+        <span className="block text-xs text-app-muted sm:hidden">
+          Confidence
+        </span>
+        {confidence(item.confidence)} confidence
+      </p>
+      <Badge tone={statusTone(item)}>{status(item)}</Badge>
+    </article>
+  );
+}
 
 export default function ResultsPage() {
-  const { sessionId } = useParams<{ sessionId: string }>(); const router = useRouter(); const [results, setResults] = useState<Results | null>(null); const [error, setError] = useState(""); const [tab, setTab] = useState<Tab>("overview"); const [planLoading, setPlanLoading] = useState(false); const [planError, setPlanError] = useState(""); const [replayAnswer, setReplayAnswer] = useState<Record<string, string>>({}); const [replayResult, setReplayResult] = useState<Record<string, ReplayResult>>({}); const [replayLoading, setReplayLoading] = useState<string | null>(null); const [deleteLoading, setDeleteLoading] = useState(false);
-  useEffect(() => { let cancelled = false; fetch(`${API_BASE_URL}/sessions/${sessionId}/results`, { cache: "no-store" }).then(async (response) => { const body = await response.json().catch(() => ({})); if (!response.ok) throw new Error(message(body.detail ?? "Results could not be loaded.")); if (!cancelled) setResults(body as Results); }).catch((caught: unknown) => { if (!cancelled) setError(caught instanceof Error ? caught.message : "Results could not be loaded."); }); return () => { cancelled = true; }; }, [sessionId]);
-  const generatePlan = async () => { if (planLoading || !results) return; setPlanLoading(true); setPlanError(""); try { const response = await fetch(`${API_BASE_URL}/sessions/${sessionId}/study-plan${results.study_plan ? "/regenerate" : ""}`, { method: "POST" }); const body = await response.json().catch(() => ({})); if (!response.ok) throw new Error(message(body.detail ?? "Study plan could not be generated.")); setResults((current) => current ? { ...current, study_plan: body.plan as StudyPlan } : current); } catch (caught) { setPlanError(caught instanceof Error ? caught.message : "Study plan could not be generated."); } finally { setPlanLoading(false); } };
-  const replay = async (questionId: string) => { const answer = replayAnswer[questionId]?.trim(); if (!answer || replayLoading) return; setReplayLoading(questionId); try { const response = await fetch(`${API_BASE_URL}/sessions/${sessionId}/questions/${questionId}/replay`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ answer_text: answer }) }); const body = await response.json().catch(() => ({})); if (!response.ok) throw new Error(message(body.detail ?? "Replay could not be evaluated.")); setReplayResult((value) => ({ ...value, [questionId]: body as ReplayResult })); setReplayAnswer((value) => ({ ...value, [questionId]: "" })); } catch (caught) { setError(caught instanceof Error ? caught.message : "Replay could not be evaluated."); } finally { setReplayLoading(null); } };
-  const remove = async () => { if (!window.confirm("Delete this session and all associated data? This cannot be undone.")) return; setDeleteLoading(true); try { const response = await fetch(`${API_BASE_URL}/sessions/${sessionId}`, { method: "DELETE" }); if (!response.ok) throw new Error("Session data could not be deleted."); router.push("/"); } catch (caught) { setError(caught instanceof Error ? caught.message : "Session data could not be deleted."); setDeleteLoading(false); } };
-  const competencies = useMemo(() => results ? [...results.competencies].sort((a, b) => rank[b.gap_priority] - rank[a.gap_priority] || a.final_score - b.final_score) : [], [results]);
-  if (error) return <main className="grid min-h-screen place-items-center bg-[#07110f] px-4 text-slate-100"><section className="w-full max-w-lg rounded-2xl border border-rose-400/30 bg-[#0b1916] p-7"><p className="font-mono text-xs font-bold uppercase tracking-[.14em] text-rose-300">Results unavailable</p><h1 className="mt-3 text-3xl font-bold text-white">We couldn’t load these results.</h1><p className="mt-4 text-sm leading-6 text-slate-300">{error}</p><div className="mt-6 flex gap-3"><Link href="/" className="rounded-xl bg-emerald-300 px-4 py-3 text-sm font-bold text-[#07110f]">Start new analysis</Link><button type="button" onClick={() => { setError(""); setResults(null); }} className="rounded-xl border border-slate-700 px-4 py-3 text-sm font-bold text-slate-200">Try again</button></div></section></main>;
-  if (!results) return <main className="grid min-h-screen place-items-center bg-[#07110f] px-4 text-slate-100"><div className="flex items-center gap-4 rounded-2xl border border-slate-800 bg-[#0b1916] p-6"><div className="size-8 animate-spin rounded-full border-2 border-slate-700 border-t-emerald-300" /><p className="text-sm font-semibold">Reading your saved results...</p></div></main>;
-  const tabs: { id: Tab; label: string }[] = [{ id: "overview", label: "Overview" }, { id: "gaps", label: "Knowledge Gaps" }, ...(results.mode === "interview" ? [{ id: "feedback" as Tab, label: "Interview Feedback" }] : []), { id: "plan", label: "Study Plan" }]; const topGaps = competencies.filter((item) => item.gap_priority === "critical" || item.gap_priority === "high").slice(0, 3);
-  const map = <div className="mt-5 space-y-3">{competencies.map((item) => <article key={item.competency_id} className="rounded-xl border border-slate-800 bg-slate-950/35 p-4"><div className="flex flex-wrap items-start justify-between gap-3"><div><h3 className="font-semibold text-white">{item.name}</h3><p className="mt-1 text-xs text-slate-500">{item.category} · JD importance: {importance(item.importance)}</p></div><span className={`rounded-full border px-3 py-1 text-xs font-bold ${statusClass(item)}`}>{status(item)}</span></div><Meter value={item.final_score} /><div className="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-xs text-slate-400"><span>Score {Math.round(item.final_score)}%</span><span>Confidence {Math.round(item.confidence * 100)}%</span><span>Importance {item.importance}/5</span></div></article>)}</div>;
-  return <main className="min-h-screen bg-[#07110f] px-4 py-5 text-slate-100 sm:px-6 lg:py-8"><section className="mx-auto max-w-6xl"><header className="flex items-center justify-between border-b border-slate-800 pb-5"><Link href="/" className="inline-flex items-center gap-2 font-bold"><span className="grid size-7 place-items-center rounded-md bg-emerald-300 font-mono text-xs text-[#07110f]">IG</span>InterviewGraph</Link>{results.ai_provider ? <span className="rounded-full border border-emerald-400/25 bg-emerald-400/10 px-3 py-1 font-mono text-xs uppercase text-emerald-200">{results.ai_provider}</span> : null}</header><section className="mt-7 rounded-2xl border border-slate-700 bg-[#0b1916] p-6 shadow-2xl shadow-black/20 sm:p-9"><p className="font-mono text-xs font-bold uppercase tracking-[.16em] text-emerald-300">{results.mode === "resume_only" ? "Resume-based analysis" : "Interview assessment"}</p><div className="mt-5 flex flex-col gap-6 sm:flex-row sm:items-end sm:justify-between"><div><h1 className="text-3xl font-bold tracking-tight text-white sm:text-5xl">OVERALL READINESS</h1><p className="mt-3 max-w-xl text-sm leading-6 text-slate-400">A deterministic role-weighted view of saved evidence and interview performance.</p></div><div className="shrink-0"><p className="text-5xl font-bold text-emerald-300">{Math.round(results.overall_readiness)}<span className="text-xl text-slate-500"> / 100</span></p><p className="mt-2 text-xs font-semibold uppercase tracking-wide text-slate-400">Confidence {Math.round(results.overall_confidence * 100)}%</p></div></div></section>{results.mode === "resume_only" ? <p className="mt-4 rounded-xl border border-amber-300/20 bg-amber-300/10 p-4 text-sm text-amber-100">Assessment based solely on résumé evidence. It does not verify technical knowledge.</p> : null}<div className="mt-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><nav className="flex gap-1 overflow-x-auto rounded-xl border border-slate-800 bg-[#0b1916] p-1.5" aria-label="Results sections">{tabs.map((item) => <button key={item.id} type="button" onClick={() => setTab(item.id)} className={`whitespace-nowrap rounded-lg px-3 py-2 text-sm font-bold focus-visible:outline-2 focus-visible:outline-emerald-300 ${tab === item.id ? "bg-emerald-300 text-[#07110f]" : "text-slate-400 hover:bg-slate-800 hover:text-white"}`}>{item.label}</button>)}</nav><button type="button" onClick={() => void remove()} disabled={deleteLoading} className="rounded-xl border border-rose-400/30 px-4 py-2.5 text-sm font-bold text-rose-200 hover:bg-rose-400/10 disabled:opacity-50">{deleteLoading ? "Deleting..." : "Delete Session Data"}</button></div>{tab === "overview" ? <div className="mt-6 grid gap-6 lg:grid-cols-[1.2fr_.8fr]"><section className="rounded-2xl border border-slate-700 bg-[#0b1916] p-5 sm:p-7"><p className="font-mono text-xs font-bold uppercase tracking-[.14em] text-emerald-300">Knowledge gap map</p><h2 className="mt-2 text-xl font-bold text-white">Focus effort where the role demands it.</h2>{map}</section><aside className="space-y-4"><section className="rounded-2xl border border-emerald-400/20 bg-emerald-400/10 p-5"><h2 className="font-mono text-xs font-bold uppercase tracking-[.14em] text-emerald-200">Top strengths</h2><ol className="mt-4 space-y-2 text-sm text-slate-100">{results.strengths.length ? results.strengths.slice(0, 3).map((item, index) => <li key={item}>{index + 1}. {item}</li>) : <li>No strong areas established yet.</li>}</ol></section><section className="rounded-2xl border border-rose-400/20 bg-rose-400/10 p-5"><h2 className="font-mono text-xs font-bold uppercase tracking-[.14em] text-rose-200">Top priority gaps</h2><ol className="mt-4 space-y-4">{topGaps.length ? topGaps.map((item, index) => <li key={item.competency_id} className="text-sm text-slate-100"><strong>{index + 1}. {item.name}</strong><span className="mt-1 block text-slate-300">Score {Math.round(item.final_score)}% · {importance(item.importance)}</span></li>) : <li className="text-sm text-slate-200">No critical or high-priority gaps identified.</li>}</ol></section></aside></div> : null}{tab === "gaps" ? <section className="mt-6 rounded-2xl border border-slate-700 bg-[#0b1916] p-5 sm:p-7"><p className="font-mono text-xs font-bold uppercase tracking-[.14em] text-emerald-300">Knowledge gap map</p>{map}</section> : null}{tab === "feedback" && results.mode === "interview" ? <section className="mt-6 space-y-5"><section className="rounded-2xl border border-slate-700 bg-[#0b1916] p-5 sm:p-7"><p className="font-mono text-xs font-bold uppercase tracking-[.14em] text-emerald-300">Interview feedback</p><div className="mt-5 space-y-4">{results.interview_feedback.map((item, index) => <article key={item.question_id} className="rounded-xl border border-slate-800 bg-slate-950/35 p-4"><div className="flex flex-wrap justify-between gap-3"><div><p className="font-mono text-xs text-emerald-300">Q{index + 1} · {item.competency_name}</p><h3 className="mt-2 font-semibold text-white">{item.question}</h3></div><span className="font-mono text-lg font-bold text-emerald-300">{Math.round(item.score)}%</span></div><p className="mt-4 rounded-lg bg-slate-900/70 p-3 text-sm leading-6 text-slate-300"><strong className="text-slate-100">Your answer: </strong>{item.candidate_answer ?? "Skipped"}</p><div className="mt-4 grid gap-3 sm:grid-cols-3 text-sm"><div><p className="font-bold text-emerald-200">Strengths</p><p className="mt-1 text-slate-400">{item.strengths.join(", ") || "—"}</p></div><div><p className="font-bold text-amber-200">Missing</p><p className="mt-1 text-slate-400">{item.missing_concepts.join(", ") || "—"}</p></div><div><p className="font-bold text-cyan-200">Improved outline</p><p className="mt-1 text-slate-400">{item.improved_answer_outline.join(" · ") || "—"}</p></div></div></article>)}</div></section><section className="rounded-2xl border border-slate-700 bg-[#0b1916] p-5 sm:p-7"><p className="font-mono text-xs font-bold uppercase tracking-[.14em] text-emerald-300">Replay weak questions</p><p className="mt-2 text-sm text-slate-400">Practice attempts never change the original assessment.</p><div className="mt-5 space-y-4">{results.interview_feedback.filter((item) => item.score < 70 || item.missing_concepts.length > 0).map((item) => { const replayed = replayResult[item.question_id] ?? item.replay_attempts.at(-1); return <article key={item.question_id} className="rounded-xl border border-slate-800 bg-slate-950/35 p-4"><p className="font-semibold text-white">{item.competency_name} · Original {Math.round(item.score)}%</p><textarea value={replayAnswer[item.question_id] ?? ""} onChange={(event) => setReplayAnswer((value) => ({ ...value, [item.question_id]: event.target.value }))} className="mt-3 min-h-28 w-full rounded-lg border border-slate-700 bg-slate-950/70 p-3 text-sm text-slate-100 outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-400/25" placeholder="Write an improved answer…" /><button type="button" onClick={() => void replay(item.question_id)} disabled={!replayAnswer[item.question_id]?.trim() || replayLoading === item.question_id} className="mt-3 rounded-lg border border-emerald-400/30 bg-emerald-400/10 px-4 py-2.5 text-sm font-bold text-emerald-100 disabled:opacity-50">{replayLoading === item.question_id ? "Evaluating your answer..." : "Try Again"}</button>{replayed ? <div className="mt-4 grid gap-3 rounded-lg bg-slate-900/70 p-3 text-sm sm:grid-cols-3"><p>Original <strong>{Math.round(replayed.original_score)}</strong></p><p>New <strong>{Math.round(replayed.new_score)}</strong></p><p>Improvement <strong>{replayed.improvement >= 0 ? "+" : ""}{Math.round(replayed.improvement)}</strong></p></div> : null}</article>; })}</div></section></section> : null}{tab === "plan" ? <section className="mt-6 rounded-2xl border border-slate-700 bg-[#0b1916] p-5 sm:p-7"><div className="flex flex-wrap items-center justify-between gap-4"><div><p className="font-mono text-xs font-bold uppercase tracking-[.14em] text-emerald-300">Targeted study plan</p><h2 className="mt-2 text-xl font-bold text-white">Close the highest-impact gaps.</h2></div><button type="button" onClick={() => void generatePlan()} disabled={planLoading} className="rounded-xl bg-emerald-300 px-4 py-3 text-sm font-bold text-[#07110f] disabled:opacity-50">{planLoading ? "Creating your study plan..." : results.study_plan ? "Regenerate Study Plan" : "Generate Study Plan"}</button></div>{planError ? <p className="mt-4 rounded-xl bg-rose-400/10 p-3 text-sm text-rose-100" role="alert">{planError}</p> : null}{results.study_plan ? <div className="mt-6 space-y-7">{(["critical", "important", "optional"] as const).map((group) => results.study_plan?.[group].length ? <div key={group}><h3 className="font-mono text-xs font-bold uppercase tracking-[.14em] text-emerald-300">{group}</h3><div className="mt-3 grid gap-4 lg:grid-cols-2">{results.study_plan[group].map((topic) => <article key={`${group}-${topic.topic}`} className="rounded-xl border border-slate-800 bg-slate-950/35 p-4"><div className="flex justify-between gap-3"><h4 className="font-semibold text-white">{topic.topic}</h4><span className="text-xs text-slate-400">{topic.estimated_time_minutes} min</span></div><p className="mt-3 text-sm text-slate-400">{topic.current_gap}</p><p className="mt-4 text-sm text-slate-200"><strong>Review: </strong>{topic.concepts_to_review.join(" · ")}</p><p className="mt-3 rounded-lg bg-emerald-400/10 p-3 text-sm text-emerald-100"><strong>Hands-on: </strong>{topic.hands_on_task}</p><p className="mt-3 text-sm text-slate-300"><strong>Practice: </strong>{topic.interview_questions_to_practice.join(" · ")}</p></article>)}</div></div> : null)}</div> : <p className="mt-6 text-sm leading-6 text-slate-400">Generate a focused plan from saved competency scores, interview signals, and résumé evidence.</p>}</section> : null}</section></main>;
+  const { sessionId } = useParams<{ sessionId: string }>();
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const [results, setResults] = useState<Results | null>(null);
+  const [error, setError] = useState("");
+  const [tab, setTab] = useState<Tab>("overview");
+  const [planLoading, setPlanLoading] = useState(false);
+  const [planError, setPlanError] = useState("");
+  const [replayAnswer, setReplayAnswer] = useState<Record<string, string>>({});
+  const [replayResult, setReplayResult] = useState<
+    Record<string, ReplayResult>
+  >({});
+  const [replayLoading, setReplayLoading] = useState<string | null>(null);
+  const [deleteLoading, setDeleteLoading] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`${API_BASE_URL}/sessions/${sessionId}/results`, {
+      cache: "no-store",
+    })
+      .then(async (response) => {
+        const body = await response.json().catch(() => ({}));
+        if (!response.ok)
+          throw new Error(
+            apiErrorMessage({
+              status: response.status,
+              detail: body.detail,
+              operation: "results",
+            }),
+          );
+        if (!cancelled) setResults(body as Results);
+      })
+      .catch((caught: unknown) => {
+        if (!cancelled)
+          setError(
+            caught instanceof TypeError
+              ? networkErrorMessage()
+              : caught instanceof Error
+              ? caught.message
+              : "Results could not be loaded.",
+          );
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [sessionId]);
+  const generatePlan = async () => {
+    if (planLoading || !results) return;
+    setPlanLoading(true);
+    setPlanError("");
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/sessions/${sessionId}/study-plan${results.study_plan ? "/regenerate" : ""}`,
+        { method: "POST" },
+      );
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok)
+        throw new Error(
+          apiErrorMessage({
+            status: response.status,
+            detail: body.detail,
+            operation: "study-plan",
+          }),
+        );
+      setResults((current) =>
+        current ? { ...current, study_plan: body.plan as StudyPlan } : current,
+      );
+    } catch (caught) {
+      setPlanError(
+        caught instanceof TypeError
+          ? networkErrorMessage()
+          : caught instanceof Error
+          ? caught.message
+          : "Study plan could not be generated.",
+      );
+    } finally {
+      setPlanLoading(false);
+    }
+  };
+  const replay = async (questionId: string) => {
+    const answer = replayAnswer[questionId]?.trim();
+    if (!answer || replayLoading) return;
+    setReplayLoading(questionId);
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}/sessions/${sessionId}/questions/${questionId}/replay`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ answer_text: answer }),
+        },
+      );
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok)
+        throw new Error(
+          apiErrorMessage({
+            status: response.status,
+            detail: body.detail,
+            operation: "replay",
+          }),
+        );
+      setReplayResult((value) => ({
+        ...value,
+        [questionId]: body as ReplayResult,
+      }));
+      setReplayAnswer((value) => ({ ...value, [questionId]: "" }));
+    } catch (caught) {
+      setError(
+        caught instanceof TypeError
+          ? networkErrorMessage()
+          : caught instanceof Error
+          ? caught.message
+          : "Replay could not be evaluated.",
+      );
+    } finally {
+      setReplayLoading(null);
+    }
+  };
+  const remove = async () => {
+    if (
+      !window.confirm(
+        "Delete this session and all associated data? This cannot be undone.",
+      )
+    )
+      return;
+    setDeleteLoading(true);
+    try {
+      const response = await fetch(`${API_BASE_URL}/sessions/${sessionId}`, {
+        method: "DELETE",
+      });
+      if (!response.ok) throw new Error("Session data could not be deleted.");
+      router.push("/");
+    } catch (caught) {
+      setError(
+        caught instanceof TypeError
+          ? networkErrorMessage()
+          : caught instanceof Error
+          ? caught.message
+          : "Session data could not be deleted.",
+      );
+      setDeleteLoading(false);
+    }
+  };
+  const competencies = useMemo(
+    () =>
+      results
+        ? [...results.competencies].sort(
+            (a, b) =>
+              rank[b.gap_priority] - rank[a.gap_priority] ||
+              a.final_score - b.final_score,
+          )
+        : [],
+    [results],
+  );
+
+  if (error === "No analysis results are available yet.")
+    return (
+      <div className="mx-auto grid min-h-[calc(100vh-10rem)] max-w-lg place-items-center">
+        <EmptyState
+          title="No analysis results yet"
+          description="Finish an interview or generate a résumé-based assessment to view your knowledge gaps and readiness."
+          action={<Link href={`/session/${sessionId}/analysis`} className="inline-flex items-center rounded-lg bg-primary-strong px-4 py-2.5 text-sm font-semibold text-white">Return to analysis</Link>}
+        />
+      </div>
+    );
+  if (error)
+    return (
+      <div className="mx-auto grid min-h-[calc(100vh-10rem)] max-w-lg place-items-center">
+        <ErrorState
+          title="We couldn’t load these results."
+          description={error}
+          action={
+            <>
+              <Link
+                href="/"
+                className="inline-flex items-center rounded-lg bg-primary-strong px-4 py-2.5 text-sm font-semibold text-white"
+              >
+                Start new analysis
+              </Link>
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  setError("");
+                  setResults(null);
+                }}
+              >
+                Try again
+              </Button>
+            </>
+          }
+        />
+      </div>
+    );
+  if (!results)
+    return (
+      <div className="mx-auto grid min-h-[calc(100vh-10rem)] max-w-lg place-items-center">
+        <LoadingState label="Reading your saved results..." />
+      </div>
+    );
+
+  const requestedTab = searchParams.get("tab");
+  const activeTab: Tab =
+    requestedTab === "plan"
+      ? "plan"
+      : requestedTab === "replay" && results.mode === "interview"
+        ? "feedback"
+        : requestedTab === "gaps"
+          ? "gaps"
+          : requestedTab === "overview"
+            ? "overview"
+        : tab;
+
+  const tabs: { id: Tab; label: string }[] = [
+    { id: "overview", label: "Overview" },
+    { id: "gaps", label: "Knowledge Gaps" },
+    ...(results.mode === "interview"
+      ? [{ id: "feedback" as Tab, label: "Interview Feedback" }]
+      : []),
+    { id: "plan", label: "Study Plan" },
+  ];
+  const priorityGaps = competencies
+    .filter(
+      (item) =>
+        item.gap_priority === "critical" || item.gap_priority === "high",
+    )
+    .slice(0, 3);
+  const gapMap = (
+    <Card className="overflow-hidden">
+      <div className="border-b border-app-border p-5 sm:px-6">
+        <h2 className="text-lg font-semibold text-white">Knowledge gap map</h2>
+        <p className="mt-1 text-sm text-app-muted">
+          Scores, role importance, confidence, and backend-calculated gap
+          status.
+        </p>
+      </div>
+      <div className="hidden border-b border-app-border bg-slate-950/20 px-6 py-3 text-xs font-medium uppercase tracking-wide text-app-muted sm:grid sm:grid-cols-[minmax(10rem,1.4fr)_minmax(7rem,.8fr)_minmax(8rem,.8fr)_minmax(7rem,.7fr)_auto]">
+        <span>Competency</span>
+        <span>Score</span>
+        <span>JD importance</span>
+        <span>Confidence</span>
+        <span>Status</span>
+      </div>
+      <div className="divide-y divide-app-border">
+        {competencies.map((item) => (
+          <GapRow key={item.competency_id} item={item} />
+        ))}
+      </div>
+    </Card>
+  );
+
+  return (
+    <section className="mx-auto max-w-7xl">
+      <PageHeader
+        eyebrow="Interview Results"
+        title="Overall Readiness"
+        description={
+          results.mode === "resume_only"
+            ? "Résumé-Based Assessment — based on submitted evidence, not verified knowledge."
+            : "Interview Assessment — combines role requirements, résumé evidence, and interview performance."
+        }
+        action={
+          <div className="text-right">
+            <p className="text-4xl font-bold tracking-tight text-white">
+              {Math.round(results.overall_readiness)}
+              <span className="text-lg text-app-muted">%</span>
+            </p>
+            <p className="mt-1 text-xs text-app-muted">
+              {confidence(results.overall_confidence)} confidence
+            </p>
+          </div>
+        }
+      />
+      <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <nav
+          className="flex gap-1 overflow-x-auto rounded-lg border border-app-border bg-surface p-1"
+          aria-label="Results sections"
+        >
+          {tabs.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              aria-current={activeTab === item.id ? "page" : undefined}
+              onClick={() => {
+                setTab(item.id);
+                router.replace(
+                  `/session/${sessionId}/results?tab=${item.id === "feedback" ? "replay" : item.id}`,
+                );
+              }}
+              className={`whitespace-nowrap rounded-md px-3 py-2 text-sm font-medium transition ${activeTab === item.id ? "bg-primary-strong text-white" : "text-app-muted hover:bg-slate-800 hover:text-white"}`}
+            >
+              {item.label}
+            </button>
+          ))}
+        </nav>
+        <Button
+          variant="danger"
+          onClick={() => void remove()}
+          disabled={deleteLoading}
+        >
+          {deleteLoading ? "Deleting..." : "Delete Session Data"}
+        </Button>
+      </div>
+      {activeTab === "overview" ? (
+        <div className="mt-6 grid gap-6 xl:grid-cols-[minmax(0,1.5fr)_minmax(18rem,.75fr)]">
+          <div>{gapMap}</div>
+          <aside className="space-y-4">
+            <Card className="p-5">
+              <p className="text-xs font-semibold uppercase tracking-[.14em] text-rose-300">
+                Priority gaps
+              </p>
+              <ol className="mt-4 space-y-4">
+                {priorityGaps.length ? (
+                  priorityGaps.map((item, index) => (
+                    <li key={item.competency_id} className="flex gap-3">
+                      <span className="grid size-6 shrink-0 place-items-center rounded-full bg-rose-400/10 text-xs font-semibold text-rose-200">
+                        {index + 1}
+                      </span>
+                      <div>
+                        <p className="font-medium text-white">{item.name}</p>
+                        <p className="mt-1 text-sm text-app-muted">
+                          {importance(item.importance)} importance ·{" "}
+                          {Math.round(item.final_score)}% score
+                        </p>
+                      </div>
+                    </li>
+                  ))
+                ) : (
+                  <li className="text-sm text-app-muted">
+                    No critical or high-priority gaps identified.
+                  </li>
+                )}
+              </ol>
+            </Card>
+            {results.strengths.length ? (
+              <Card className="p-5">
+                <p className="text-xs font-semibold uppercase tracking-[.14em] text-green-200">
+                  Summary
+                </p>
+                <ul className="mt-4 space-y-2 text-sm text-slate-200">
+                  {results.strengths.slice(0, 3).map((item) => (
+                    <li key={item}>• {item}</li>
+                  ))}
+                </ul>
+              </Card>
+            ) : null}
+          </aside>
+        </div>
+      ) : null}
+      {activeTab === "gaps" ? <div className="mt-6">{gapMap}</div> : null}
+      {activeTab === "feedback" && results.mode === "interview" ? (
+        <section className="mt-6 space-y-5">
+          <Card className="p-5 sm:p-6">
+            <h2 className="text-lg font-semibold text-white">
+              Interview feedback
+            </h2>
+            <div className="mt-5 space-y-4">
+              {results.interview_feedback.map((item, index) => (
+                <article
+                  key={item.question_id}
+                  className="rounded-lg border border-app-border bg-slate-950/20 p-4"
+                >
+                  <div className="flex flex-wrap justify-between gap-3">
+                    <div>
+                      <p className="text-xs font-medium text-indigo-300">
+                        Question {index + 1} · {item.competency_name}
+                      </p>
+                      <h3 className="mt-2 font-medium text-white">
+                        {item.question}
+                      </h3>
+                    </div>
+                    <p className="text-xl font-semibold text-white">
+                      {Math.round(item.score)}%
+                    </p>
+                  </div>
+                  <p className="mt-4 text-sm leading-6 text-app-muted">
+                    {item.candidate_answer ?? "Skipped"}
+                  </p>
+                </article>
+              ))}
+            </div>
+          </Card>
+          <ReplayPanel
+            items={results.interview_feedback}
+            answers={replayAnswer}
+            results={replayResult}
+            loadingId={replayLoading}
+            onAnswer={(id, value) =>
+              setReplayAnswer((current) => ({ ...current, [id]: value }))
+            }
+            onReplay={(id) => void replay(id)}
+          />
+        </section>
+      ) : null}
+      {activeTab === "plan" ? (
+        <StudyPlanPanel
+          plan={results.study_plan}
+          loading={planLoading}
+          error={planError}
+          onGenerate={() => void generatePlan()}
+        />
+      ) : null}
+    </section>
+  );
 }
